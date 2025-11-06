@@ -1,0 +1,7 @@
+packaging
+numpy
+unsloth_zoo
+torchvision
+torchaudio
+triton
+bitsandbytes
