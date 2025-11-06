@@ -21,6 +21,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib import colors
 
+from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained('openai-community/gpt2-large')
+
 # Alignment mapping
 ALIGN_MAP = {
     "LEFT": TA_LEFT,
@@ -310,7 +314,7 @@ def process_one(item):
         config['alignment'] = ALIGN_MAP.get(item_config['alignment'], TA_JUSTIFY)
     
     # Get text
-    text = item.get('context', '')
+    text = item.get('text', '')
     assert text
     
     # Call inference function
@@ -321,7 +325,25 @@ def process_one(item):
         unique_id=_id
     )
     
-    item['image_paths'] = image_paths
+    # Convert absolute paths to relative paths
+    relative_image_paths = []
+    for path in image_paths:
+        # Remove the output_dir prefix to get relative path
+        if path.startswith(OUTPUT_DIR):
+            relative_path = path[len(OUTPUT_DIR):]
+            # Remove leading slash if present
+            if relative_path.startswith('/'):
+                relative_path = relative_path[1:]
+            relative_image_paths.append(relative_path)
+        else:
+            relative_image_paths.append(path)
+    
+    # Calculate token count
+    tokens = tokenizer.encode(text, add_special_tokens=False)
+    token_num = len(tokens)
+    
+    item['image_paths'] = relative_image_paths
+    item['token_num'] = token_num
     return item
 
 
@@ -346,8 +368,24 @@ def batch_process_to_images(json_path, output_dir, output_jsonl_path,
             os.remove(output_jsonl_path)
     
     # Read data
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data_to_process = json.load(f)
+    if json_path.endswith('.jsonl'):
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data_to_process = [json.loads(line.strip()) for line in f]
+    else:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data_to_process = json.load(f)
+    
+    # Generate unique_id for items that don't have one
+    import hashlib
+    for i, item in enumerate(data_to_process):
+        if 'unique_id' not in item or not item['unique_id']:
+            # Generate unique ID based on text content or index
+            text_content = item.get('text', '')
+            if text_content:
+                item['unique_id'] = hashlib.md5(text_content.encode()).hexdigest()[:16]
+            else:
+                # Fallback: use index-based ID
+                item['unique_id'] = f'item_{i:08d}'
     
     # Get already processed IDs
     processed_ids = set()
@@ -365,7 +403,8 @@ def batch_process_to_images(json_path, output_dir, output_jsonl_path,
     data_to_process = [item for item in data_to_process 
                       if item.get('unique_id') not in processed_ids]
     print(f"Remaining items to process: {len(data_to_process)}")
-    
+    # {"text": "Gregg Herken is an American historian and museum curator who is Professor Emeritus of modern American diplomatic History at the University of California, Merced, whose scholarship mostly concerns the history of the development of atomic energy and the Cold War.\n\nBiography\nIn 1969, Herken received a B.A. from University of California, Santa Cruz.  In 1974, he received a Ph.D. in  modern American diplomatic history from Princeton University.\n\nHerken held teaching positions at California State University, San Luis Obispo, Oberlin College, Yale University, and California Institute of Technology, and was a Fulbright-Hays senior research scholar at Lund University.  During 1988–2003 he was senior historian and curator at the Smithsonian Institution's National Air and Space Museum in Washington, D.C. He also served on the U.S. government's Advisory Committee on Human Radiation Experiments during 1994–95.\n\nGraduate Students \nHerken has served as a dissertation advisor to several students, including Richard Ravalli, Trevor Albertson, and served on the dissertation committee for Tami Davis-Biddle.\n\nWorks\nIn 2003, Herken's book Brotherhood of the Bomb, for which he received a MacArthur Grant to write, was a finalist for the Los Angeles Times Book Prize in history.\n\nReferences\n\nExternal links\n Smithsonian Air and Space Wall of Honor page\n\n21st-century American historians\n21st-century American male writers\n20th-century American historians\nAmerican male non-fiction writers\nUniversity of California, Merced faculty\nPrinceton University alumni\nUniversity of California, Santa Cruz alumni\nAmerican curators\nSmithsonian Institution people\nMacArthur Fellows\nLiving people\nPlace of birth missing (living people)\nDate of birth missing (living people)\nHistorians of nuclear weapons\nYear of birth missing (living people)\nHistorians from California\n20th-century American male writers", "meta": {"title": "Gregg Herken", "url": "https://en.wikipedia.org/wiki/Gregg%20Herken", "language": "en", "timestamp": "20230320"}}
+
     if not data_to_process:
         print("All items processed")
         return
@@ -402,33 +441,33 @@ if __name__ == '__main__':
     # Example 1: Single text inference
     CONFIG_PATH = 'config_en.json'
     # text = "This is a test text\nS\necond line of text\nThird line of text"
-    with open('/home/dyh/vision_compressor/OKX/ocr_utils/input.txt', 'r', encoding='utf-8') as f:
-        text = f.read()
-    OUTPUT_DIR = './output_images'
-    images = text_to_images(
-        text=text,
-        output_dir=OUTPUT_DIR,
-        config_path=CONFIG_PATH,
-        unique_id='test_001'
-    )
-    print(f"Generated {len(images)} images:")
-    for img in images:
-        print(f"  {img}")
+    # with open('/home/dyh/vision_compressor/OKX/ocr_utils/input.txt', 'r', encoding='utf-8') as f:
+    #     text = f.read()
+    # OUTPUT_DIR = './output_images'
+    # images = text_to_images(
+    #     text=text,
+    #     output_dir=OUTPUT_DIR,
+    #     config_path=CONFIG_PATH,
+    #     unique_id='test_001'
+    # )
+    # print(f"Generated {len(images)} images:")
+    # for img in images:
+    #     print(f"  {img}")
     
     # Example 2: Batch processing
     # CONFIG_PATH = '../config/config.json'
-    # JSON_PATH = '../evaluation/mrcr/data/processed_2needle_0-128k.json'
-    # OUTPUT_JSONL_PATH = '../evaluation/mrcr/data/processed_2needle_0-128k.jsonl'
-    # OUTPUT_DIR = '../evaluation/mrcr/rendered_images'
+    JSON_PATH = '/home/dyh/vision_compressor/redpajama_data/wikipedia_english.jsonl'
+    OUTPUT_JSONL_PATH = '/home/dyh/vision_compressor/OKX/datasets/wikipedia_english.jsonl'
+    OUTPUT_DIR = '/home/dyh/vision_compressor/OKX/datasets/wikipedia_english_images'
     
-    # batch_process_to_images(
-    #     json_path=JSON_PATH,
-    #     output_dir=OUTPUT_DIR,
-    #     output_jsonl_path=OUTPUT_JSONL_PATH,
-    #     config_path=CONFIG_PATH,
-    #     processes=16,
-    #     is_recover=True,
-    #     batch_size=100
-    # )
+    batch_process_to_images(
+        json_path=JSON_PATH,
+        output_dir=OUTPUT_DIR,
+        output_jsonl_path=OUTPUT_JSONL_PATH,
+        config_path=CONFIG_PATH,
+        processes=64,
+        is_recover=False,
+        batch_size=200
+    )
 
 
